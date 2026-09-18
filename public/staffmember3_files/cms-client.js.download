@@ -1,0 +1,473 @@
+/*
+  cms-client.js - updated to:
+   - preserve / render icons for values
+   - update stats.data-target only and reliably animate counters after CMS update
+*/
+(async function(){
+  window.__RENDERTRON_READY = false;
+
+  async function init() {
+    try {
+
+      // ================================
+      // ORIGINAL CMS CODE STARTS HERE
+      // ================================
+
+  async function fetchSite(){ try{ const r = await fetch('/api/site'); return r.ok? await r.json() : {}; }catch(e){console.warn('fetchSite failed',e); return {}; } }
+  async function fetchCol(name){ try{ const r = await fetch('/api/'+name); return r.ok? await r.json() : []; }catch(e){console.warn('fetchCol',name,e); return []; } }
+
+      // ================================
+      // 🚀 PARALLEL FETCH
+      // ================================
+      const [
+        site,
+        stats,
+        programs,
+        teachers,
+        staff,
+        gallery,
+        testi,
+        news,
+        announcements,
+        faqs
+      ] = await Promise.all([
+        fetchSite(),
+        fetchCol('stats'),
+        fetchCol('programs'),
+        fetchCol('teachers'),
+        fetchCol('staff'),
+        fetchCol('gallery'),
+        fetchCol('testimonials'),
+        fetchCol('news'),
+        fetchCol('announcements'),
+        fetchCol('faq')
+      ]);
+  window.SITE = site;
+
+  // --- Normalize stats if stringified ---
+  if (site.stats && typeof site.stats === 'string') {
+    try { site.stats = JSON.parse(site.stats); } catch(e) { console.warn('stats parse failed', e); }
+  }
+    // --- META ---
+    if(site.meta){
+      if(site.meta.title) document.title = site.meta.title;
+      const desc = document.querySelector('meta[name="description"]');
+      if(desc && site.meta.description) desc.setAttribute('content', site.meta.description);
+      const logo = document.querySelector('.brand img') || document.querySelector('header img');
+      if(logo && site.meta.logo) logo.src = site.meta.logo;
+    }
+
+  // --- STATS (dynamic from collection) ---
+  if (Array.isArray(stats) && stats.length) {
+    const wrap = document.getElementById('statsWrap');
+    wrap.innerHTML = stats.map(s => `
+      <div class="stat-block">
+        <div class="num" data-target="${s.value}">0</div>
+        <div>${s.label}</div>
+      </div>`).join('');
+
+    // animate counters
+    wrap.querySelectorAll('.num').forEach(el => {
+      const target = Number(el.getAttribute('data-target') || 0);
+      let start = null;
+      const step = ts => {
+        if (!start) start = ts;
+        const progress = Math.min((ts - start) / 1200, 1);
+        const eased = 1 - (1 - progress) * (1 - progress);
+        el.textContent = Math.floor(eased * target);
+        if (progress < 1) requestAnimationFrame(step);
+        else el.textContent = target;
+      };
+      requestAnimationFrame(step);
+    });
+
+// ✅ GSAP fade-in animation (Rendertron-safe, HARD FIX)
+if (window.gsap) {
+  const elements = wrap.querySelectorAll('.stat-block');
+  const isPrerender = /Rendertron|bot|crawler|spider/i.test(navigator.userAgent);
+
+    if (isPrerender) {
+      document.body.classList.add('prerender');
+    } else if (window.ScrollTrigger) {
+    // 👇 Normal user animation
+    gsap.from(elements, {
+      y: 10,
+      stagger: 0.08,
+      autoAlpha: 0,
+      duration: 0.7,
+      scrollTrigger: {
+        trigger: '#stats',
+        start: 'top 85%'
+      }
+    });
+  } else {
+    // 👇 Fallback (no ScrollTrigger)
+    gsap.from(elements, {
+      y: 10,
+      stagger: 0.08,
+      autoAlpha: 0,
+      duration: 0.7
+    });
+  }
+}
+  }
+
+    // --- HERO ---
+    if(site.hero){
+      const eyebrow = document.querySelector('.eyebrow, .hero .eyebrow');
+      if(eyebrow) eyebrow.textContent = site.hero.eyebrow || eyebrow.textContent;
+      const greeting = document.getElementById('greeting') || document.querySelector('.greeting');
+      if(greeting) greeting.textContent = site.hero.greeting || greeting.textContent;
+      const lead = document.querySelector('.hero p.lead, .lead');
+      if(lead) lead.textContent = site.hero.lead || lead.textContent;
+      const heroEl = document.querySelector('#heroPosterImg');
+      if (heroEl && site.hero.poster) {
+        heroEl.src = site.hero.poster;
+      }
+            if(Array.isArray(site.hero.cards)){
+        const cardsWrap = document.querySelector('.hero-cards, .cards, .hero .cards');
+        if(cardsWrap){
+          cardsWrap.innerHTML = site.hero.cards.map(c=>`<div class="card-mini"><h4>${c.title}</h4><p>${c.desc}</p></div>`).join('');
+        }
+      }
+    }
+
+    // --- ABOUT ---
+    if(site.about){
+      const aboutLead = document.querySelector('#about .section-head p.lead, #about .lead, .about .lead');
+      if(aboutLead) aboutLead.textContent = site.about.lead || aboutLead.textContent;
+      const aboutText = document.querySelector('#about p, #about .text, .about p');
+      if(aboutText) aboutText.textContent = site.about.text || aboutText.textContent;
+      const aboutImg = document.querySelector('#about img, .about img');
+      if(aboutImg && site.about.image) aboutImg.src = site.about.image;
+    }
+
+    // --- VALUES (preserve icon) ---
+    if(Array.isArray(site.values)){
+      const wrap = document.querySelector('.values-grid, .values, .values-list');
+      if(wrap){
+        // default mapping if icon missing
+        const defaults = {
+          'Respect':'fa-solid fa-hands-holding-child',
+          'Curiosity':'fa-solid fa-magnifying-glass',
+          'Kindness':'fa-solid fa-heart',
+          'Responsibility':'fa-solid fa-clipboard-check',
+          'Excellence':'fa-solid fa-star'
+        };
+        wrap.innerHTML = site.values.map(v=>{
+          const icon = v.icon || defaults[v.title] || '';
+          return `<div class="value">${icon? `<i class="${icon}" aria-hidden="true" style="font-size:1.2rem;margin-right:8px"></i>`: ''}<h4>${v.title}</h4><p>${v.desc}</p></div>`
+        }).join('');
+      }
+    }
+
+    // --- PROGRAMS ---
+    if(programs && programs.length){
+      const container = document.querySelector('#programs .grid-cards, .programs .grid, .programs');
+      if(container){
+        container.innerHTML = programs.map(p=>`<article class="program"><img src="${p.image||''}" alt="${p.title}"><h4>${p.title}</h4><p>${p.description}</p></article>`).join('');
+      }
+    }
+
+    // --- TEACHERS ---
+    if (teachers && teachers.length) {
+      const swiperWrap = document.querySelector('#swiperTeachers .swiper-wrapper');
+      if (swiperWrap) {
+        swiperWrap.innerHTML = teachers.map(t => `
+          <div class="swiper-slide">
+            <div class="teacher">
+              <img src="${t.image || ''}" alt="${t.name}">
+              <h4>${t.name}</h4>
+              <p>${t.role} · ${t.bio}</p>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      // Re-init Swiper so new slides show
+      if (window.Swiper) {
+        if (window.teachersSwiper) {
+          window.teachersSwiper.destroy(true, true);
+        }
+        window.teachersSwiper = new Swiper('#swiperTeachers', {
+          slidesPerView: 1, // default (small screens)
+          breakpoints: {
+            980: { slidesPerView: 3 } // 3 slides when viewport ≥ 980px
+          },
+          spaceBetween: 20,
+          loop: true,
+          // 👇 AUTO SWIPE MAGIC
+          autoplay: {
+            delay: 3000,              // 3 seconds
+            disableOnInteraction: false // keep autoplay after user swipes
+          },
+          pagination: { el: '#swiperTeachers .swiper-pagination', clickable: true },
+          navigation: { nextEl: '#swiperTeachers .swiper-button-next', prevEl: '#swiperTeachers .swiper-button-prev' }
+        });
+      }
+    }
+
+
+    // --- STAFF ---
+    if (staff && staff.length) {
+      const swiperWrap = document.querySelector('#swiperStaff .swiper-wrapper');
+      if (swiperWrap) {
+        swiperWrap.innerHTML = staff.map(s => `
+          <div class="swiper-slide">
+            <div class="staff1">
+              <img src="${s.image || ''}" alt="${s.name}">
+              <h4>${s.name}</h4>
+              <p>${s.role} · ${s.bio}</p>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      // Re-init Swiper so new slides show
+      if (window.Swiper) {
+        if (window.staffSwiper) {
+          window.staffSwiper.destroy(true, true);
+        }
+        window.staffSwiper = new Swiper('#swiperStaff', {
+          slidesPerView: 1, // default (small screens)
+          breakpoints: {
+            980: { slidesPerView: 3 } // 3 slides when viewport ≥ 980px
+          },
+          spaceBetween: 20,
+          loop: true,
+          // 👇 AUTO SWIPE MAGIC
+          autoplay: {
+            delay: 3000,              // 3 seconds
+            disableOnInteraction: false // keep autoplay after user swipes
+          },
+          pagination: { el: '#swiperStaff .swiper-pagination', clickable: true },
+          navigation: { nextEl: '#swiperStaff .swiper-button-next', prevEl: '#swiperStaff .swiper-button-prev' }
+        });
+      }
+    }
+
+// --- GALLERY ---
+if (gallery && gallery.length) {
+  const swiperWrap = document.querySelector('#swiperGallery .swiper-wrapper');
+
+  if (swiperWrap) {
+    swiperWrap.innerHTML = gallery.map(it => {
+      const src = it.src || '';
+      const thumb = (it.thumb && !it.thumb.endsWith('.mp4'))
+        ? it.thumb
+        : '/images/default-video-thumb.jpg';
+
+      const isVideo =
+        (it.type || '').toLowerCase().includes('video') ||
+        src.toLowerCase().endsWith('.mp4');
+
+      return `
+        <div class="swiper-slide">
+          <a href="${src}" class="glightbox" data-gallery="kids" ${isVideo ? 'data-type="video"' : ''}>
+            <img src="${isVideo ? thumb : (thumb || src)}" alt="">
+          </a>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // INIT SWIPER (same logic as staff)
+  if (window.Swiper) {
+    if (window.gallerySwiper) {
+      window.gallerySwiper.destroy(true, true);
+    }
+
+    window.gallerySwiper = new Swiper('#swiperGallery', {
+      slidesPerView: 1,
+
+      breakpoints: {
+        768: { slidesPerView: 2 },
+        980: { slidesPerView: 3 }
+      },
+
+      spaceBetween: 20,
+      loop: true,
+
+      autoplay: {
+        delay: 3000,
+        disableOnInteraction: false
+      },
+
+      pagination: { el: '#swiperGallery .swiper-pagination', clickable: true },
+      navigation: { nextEl: '#swiperGallery .swiper-button-next', prevEl: '#swiperGallery .swiper-button-prev' }
+    });
+  }
+
+  // Re-init GLightbox AFTER DOM update
+  if (window.GLightbox) {
+    GLightbox({ selector: '.glightbox' });
+  }
+}
+
+    // --- TESTIMONIALS ---
+    if(testi && testi.length){
+      const wrap = document.querySelector('#swiperTestimonials .swiper-wrapper, .testimonials .swiper-wrapper');
+      if(wrap) wrap.innerHTML = testi.map(t=>`<div class="swiper-slide"><div class="testimonial">“${t.text}” — <strong>${t.author}</strong></div></div>`).join('');
+    
+      // Re-init Swiper after injection
+      if (window.Swiper) {
+        if (window.testimonialsSwiper) {
+          window.testimonialsSwiper.destroy(true, true);
+        }
+        window.testimonialsSwiper = new Swiper('#swiperTestimonials', {
+          loop: true,
+          slidesPerView: 1,
+          spaceBetween: 20,
+          breakpoints: {
+            980: { slidesPerView: 3 } // 3 per view on large screens
+          },
+          autoplay: {
+            delay: 3500,
+            disableOnInteraction: false
+          },
+          pagination: {
+            el: '#swiperTestimonials .swiper-pagination',
+            clickable: true
+          }
+        });
+      }
+    }
+
+    // --- NEWS ---
+    if(news && news.length){
+      const wrap = document.getElementById('newsS') || document.querySelector('.news-list');
+      if(wrap){
+        wrap.innerHTML = news.map(n=>`<article class="news-item"><img src="${n.image||''}" alt="${n.title}"><h3>${n.title}</h3><p>${n.excerpt}</p></article>`).join('');
+      }
+    }
+
+    // --- ANNOUNCEMENTS ---
+    if(announcements && announcements.length){
+      const wrap = document.getElementById('announcementsS') || document.querySelector('.announcements-list');
+      if(wrap){
+        wrap.innerHTML = announcements.map(n=>`<article class="announcements-item"><h3>${n.title}</h3><p>${n.excerpt} <a href="${n.document||''}">Here</a> </p></article>`).join('');
+      }
+    }
+
+    // --- FAQ ---
+    if (faqs && faqs.length) {
+      const faqWrap = document.querySelector('#faq .faq');
+      if (faqWrap) {
+        faqWrap.innerHTML = faqs.map(f =>
+          `<details>
+             <summary>${f.question}</summary>
+             <p>${f.answer}</p>
+           </details>`
+        ).join('');
+      }
+    }
+
+    // --- Save sent message ---
+    document.getElementById('contactForm')?.addEventListener('submit', async e => {
+      e.preventDefault();
+      
+      const name = (document.getElementById('c-name')?.value || '').trim();
+      const email = (document.getElementById('c-email')?.value || '').trim();
+      const message = (document.getElementById('c-message')?.value || '').trim();
+
+      // check before sending
+      if (!name || !email || !message) {
+        document.getElementById('formStatus').textContent = '❌ All fields are required';
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/contact_forms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, message })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          document.getElementById('formStatus').textContent = `❌ ${data.error || 'Failed to send message'}`;
+          return;
+        }
+
+        document.getElementById('formStatus').textContent = 'Thanks — our admissions team will be in touch.';
+        e.target.reset();
+      } catch (err) {
+        console.error('Contact form fetch error:', err);
+        document.getElementById('formStatus').textContent = '❌ Failed to send message';
+      }
+    });
+
+    // --- CONTACT / FOOTER ---
+    if(site.contact){
+      const phoneEl = document.querySelector('.contact-phone');
+      const emailEl = document.querySelector('.contact-email');
+      const addressEl = document.querySelector('.contact-address');
+
+      if(phoneEl && site.contact.phone) phoneEl.textContent = site.contact.phone;
+      if(emailEl && site.contact.email) emailEl.textContent = site.contact.email;
+      if(addressEl && site.contact.address) addressEl.textContent = site.contact.address;
+    }
+
+    if(site.footer && site.footer.text){
+      const footerText = document.querySelector('.footer-text');
+      if(footerText) footerText.textContent = site.footer.text;
+    }
+
+    // initialize glightbox/swiper if available
+    try{ if(window.Swiper) { /* page will init as needed */ } }catch(e){}
+    try{ if(window.GLightbox) GLightbox({selector:'.glightbox'}); }catch(e){}
+
+    // === FINAL WAIT SEQUENCE (FIXED) ===
+
+    // wait for images
+    await Promise.all(Array.from(document.images).map(img => {
+      if (img.complete) return Promise.resolve();
+      return new Promise(res => {
+        img.onload = img.onerror = res;
+      });
+    }));
+
+    // wait for DOM paint
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    // wait for important sections (ADD MORE CHECKS)
+    await new Promise(resolve => {
+      const check = () => {
+        const statsReady = document.querySelectorAll('#statsWrap .stat-block').length > 0;
+        const teachersReady = document.querySelectorAll('#swiperTeachers .swiper-slide').length > 0;
+        const staffReady = document.querySelectorAll('#swiperStaff .swiper-slide').length > 0;
+        const galleryReady = document.querySelectorAll('#gallery a').length > 0;
+        const newsReady = document.querySelectorAll('.news-item').length > 0;
+        const testiReady = document.querySelectorAll('#swiperTestimonials .swiper-slide').length > 0;
+
+        const readyCount = [
+          statsReady,
+          teachersReady,
+          staffReady,
+          galleryReady,
+          newsReady,
+          testiReady
+        ].filter(Boolean).length;
+        
+        if (readyCount >= 3) {
+          resolve();
+        } else {
+          setTimeout(check, 100);
+        }
+      };
+      check();
+    });
+
+    // small buffer
+    await new Promise(r => setTimeout(r,1500));
+
+    window.__RENDERTRON_READY = true;
+
+  }catch(err){
+    console.error('cms-client error', err);
+    window.__RENDERTRON_READY = true; // fail-safe
+  }
+}
+await init();
+})();
